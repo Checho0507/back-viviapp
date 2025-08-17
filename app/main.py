@@ -16,7 +16,7 @@ app = FastAPI(title="Pedidos API", version="1.0")
 
 # Configurar CORS para el frontend en Vite
 origins = [
-    "http://localhost:5174",
+    "http://localhost:5173",
 ]
 
 app.add_middleware(
