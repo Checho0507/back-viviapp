@@ -1,1 +1,16 @@
+# Ignorar base de datos local
+*.db
+
+# Ignorar archivos de entorno virtual
+.venv/
+venv/
+
+# Ignorar configuraciones locales
 .env
+
+# Ignorar cachés
+__pycache__/
+*.pyc
+
+# Alembic: ignorar el archivo de SQLite si lo usas
+alembic.ini
