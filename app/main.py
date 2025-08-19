@@ -9,10 +9,12 @@ from app.database import get_db
 from app import crud, models
 import logging
 
-# Crear la app
+# =====================
+# CONFIGURACIÓN DE LA APP
+# =====================
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# Configurar CORS
+# CORS
 origins = [
     "http://localhost:5173",
     "https://tu-frontend.vercel.app"
@@ -28,12 +30,14 @@ app.add_middleware(
 
 # Logging
 logger = logging.getLogger("uvicorn.access")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# Middleware para logging
 @app.middleware("http")
 async def log_requests(request, call_next):
-    logger.info(f"Request: {request.method} {request.url}")
+    logger.info(f"Request received: {request.method} {request.url}")
     response = await call_next(request)
-    logger.info(f"Response status: {response.status_code}")
+    logger.info(f"Response sent: {request.method} {request.url} - Status: {response.status_code}")
     return response
 
 # =====================
@@ -41,7 +45,7 @@ async def log_requests(request, call_next):
 # =====================
 class PedidoCreate(BaseModel):
     distribuidor: str
-    valor: condecimal(max_digits=10, decimal_places=2) # type: ignore
+    valor: condecimal(max_digits=10, decimal_places=2)  # type: ignore
     fecha: date
     descripcion: str | None = None
 
@@ -50,13 +54,12 @@ class PedidoOut(PedidoCreate):
 
 class ResumenDia(BaseModel):
     fecha: date
-    total: condecimal(max_digits=12, decimal_places=2) # type: ignore
+    total: condecimal(max_digits=12, decimal_places=2)  # type: ignore
     cantidad: int
 
 # =====================
 # ENDPOINTS
 # =====================
-
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
