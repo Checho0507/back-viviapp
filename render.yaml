@@ -9,3 +9,5 @@ services:
       - key: DATABASE_URL
         value: "postgresql+psycopg2://checho:o5936ATJxThofG2jwElI5wzZfuhpslot@dpg-d2hq9pm3jp1c738lktsg-a/pedidos_00mw?sslmode=require"
     autoDeploy: true
+    pythonVersion: 3.11
+

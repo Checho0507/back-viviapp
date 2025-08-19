@@ -4,6 +4,6 @@ gunicorn==21.2.0
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.10
 python-dotenv==1.0.1
-pydantic==2.5.3
+pydantic==2.6.1
 alembic==1.13.1
 pytz==2024.1
