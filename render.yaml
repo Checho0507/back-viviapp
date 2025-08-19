@@ -1,12 +1,12 @@
+env: python
+pythonVersion: 3.11.9
 services:
   - type: web
     name: mi-backend
-    env: python
     plan: free
     buildCommand: "pip install --prefer-binary --no-cache-dir -r requirements.txt"
-    startCommand: "gunicorn app.main:app 0.0.0.0:$PORT"
+    startCommand: "gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT"
     envVars:
       - key: DATABASE_URL
         value: "postgresql+psycopg2://checho:o5936ATJxThofG2jwElI5wzZfuhpslot@dpg-d2hq9pm3jp1c738lktsg-a/pedidos_00mw?sslmode=require"
     autoDeploy: true
-
