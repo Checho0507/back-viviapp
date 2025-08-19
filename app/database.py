@@ -6,10 +6,13 @@ from .settings import settings
 DATABASE_URL = settings.database_url
 
 # Configuración del motor
-engine_kwargs = {"pool_pre_ping": True}
+engine_kwargs = {
+    "pool_pre_ping": True,  # Revisa conexión antes de usarla
+    "future": True  # Activa modo SQLAlchemy 2.x
+}
 connect_args = {}
 
-# Ajuste especial si usas SQLite (ej. en desarrollo local)
+# Ajuste especial si usas SQLite en desarrollo
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 
@@ -17,20 +20,19 @@ if DATABASE_URL.startswith("sqlite"):
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
-    pool_size=10,  # útil en producción
-    max_overflow=20,  # conexiones adicionales si hay carga
-    pool_timeout=30,  # espera antes de error por pool lleno
+    pool_size=5,       # Ajuste conservador para Render
+    max_overflow=10,   # Conexiones extra en picos
+    pool_timeout=30,   # Tiempo máximo antes de error
     **engine_kwargs
 )
 
 # Crear sesión
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
-# Base para los modelos
+# Base para modelos
 Base = declarative_base()
 
-
-# Dependencia para inyección en FastAPI
+# Dependencia para FastAPI
 def get_db():
     db = SessionLocal()
     try:

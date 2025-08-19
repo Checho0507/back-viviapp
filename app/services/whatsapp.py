@@ -1,17 +1,18 @@
 from dataclasses import dataclass
-from decimal import Decimal
+from typing import Optional, Dict
 import httpx
 
 from ..schemas import ResumenDia
 from ..utils import formatear_fecha_col
 from ..settings import settings
 
+
 @dataclass
 class WhatsAppResult:
     ok: bool
     provider: str
-    detail: dict | None = None
-    error: str | None = None
+    detail: Optional[Dict] = None
+    error: Optional[str] = None
 
 
 def _armar_mensaje(resumen: ResumenDia) -> str:
@@ -38,17 +39,16 @@ async def send_whatsapp(resumen: ResumenDia) -> WhatsAppResult:
         return await _send_twilio(message)
     elif provider == "meta":
         return await _send_meta(message)
-    else:
-        return WhatsAppResult(ok=False, provider=provider, error="Proveedor WhatsApp no soportado")
+    return WhatsAppResult(ok=False, provider=provider, error="Proveedor WhatsApp no soportado")
 
 
 async def _send_twilio(message: str) -> WhatsAppResult:
-    if not (
-        settings.twilio_account_sid
-        and settings.twilio_auth_token
-        and settings.twilio_whatsapp_from
-        and settings.whatsapp_to
-    ):
+    if not all([
+        settings.twilio_account_sid,
+        settings.twilio_auth_token,
+        settings.twilio_whatsapp_from,
+        settings.whatsapp_to,
+    ]):
         return WhatsAppResult(ok=False, provider="twilio", error="Faltan credenciales Twilio en .env")
 
     url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Messages.json"
@@ -67,11 +67,11 @@ async def _send_twilio(message: str) -> WhatsAppResult:
 
 
 async def _send_meta(message: str) -> WhatsAppResult:
-    if not (
-        settings.whatsapp_meta_token
-        and settings.whatsapp_meta_phone_id
-        and settings.whatsapp_to_plain
-    ):
+    if not all([
+        settings.whatsapp_meta_token,
+        settings.whatsapp_meta_phone_id,
+        settings.whatsapp_to_plain,
+    ]):
         return WhatsAppResult(ok=False, provider="meta", error="Faltan credenciales Meta WhatsApp Cloud en .env")
 
     url = f"https://graph.facebook.com/v21.0/{settings.whatsapp_meta_phone_id}/messages"

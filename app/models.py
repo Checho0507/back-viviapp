@@ -5,11 +5,10 @@ class Pedido(Base):
     __tablename__ = "pedidos"
 
     id = Column(Integer, primary_key=True, index=True)
-    distribuidor = Column(String, nullable=False, index=True)
+    distribuidor = Column(String(100), nullable=False, index=True)
     fecha = Column(Date, nullable=False, index=True)
-    # Numeric para trabajar bien con Decimal (evitar Float)
     valor = Column(Numeric(12, 2), nullable=False)
-    descripcion = Column(String, nullable=True)
+    descripcion = Column(String(255), nullable=True)
 
-# Índices compuestos recomendados
+# Índice compuesto para mejorar búsquedas por fecha y distribuidor
 Index("ix_pedidos_fecha_distribuidor", Pedido.fecha, Pedido.distribuidor)

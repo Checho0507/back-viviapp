@@ -1,22 +1,21 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, condecimal
 from datetime import date, datetime
 from typing import List
 import pytz
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app import crud  # tu módulo con funciones CRUD
-from app import models  # tus modelos de SQLAlchemy
-
+from app import crud, models
 import logging
 
 # Crear la app
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# Configurar CORS para el frontend en Vite
+# Configurar CORS
 origins = [
     "http://localhost:5173",
+    "https://tu-frontend.vercel.app"
 ]
 
 app.add_middleware(
@@ -27,14 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware de logging
+# Logging
 logger = logging.getLogger("uvicorn.access")
 
 @app.middleware("http")
 async def log_requests(request, call_next):
-    print(f"Request: {request.method} {request.url}")
+    logger.info(f"Request: {request.method} {request.url}")
     response = await call_next(request)
-    print(f"Response status: {response.status_code}")
+    logger.info(f"Response status: {response.status_code}")
     return response
 
 # =====================
@@ -42,7 +41,7 @@ async def log_requests(request, call_next):
 # =====================
 class PedidoCreate(BaseModel):
     distribuidor: str
-    valor: float
+    valor: condecimal(max_digits=10, decimal_places=2) # type: ignore
     fecha: date
     descripcion: str | None = None
 
@@ -51,33 +50,40 @@ class PedidoOut(PedidoCreate):
 
 class ResumenDia(BaseModel):
     fecha: date
-    total_pedidos: int
-    total_valor: float
+    total: condecimal(max_digits=12, decimal_places=2) # type: ignore
+    cantidad: int
 
 # =====================
-# ENDPOINTS DE PEDIDOS
+# ENDPOINTS
 # =====================
 
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
 
-@app.get("/pedidos")
+@app.get("/pedidos", response_model=List[PedidoOut])
 def listar_pedidos(db: Session = Depends(get_db)):
-    pedidos = db.query(models.Pedido).all()
-    return pedidos
+    return db.query(models.Pedido).all()
 
-@app.get("/pedidos/resumen", response_model=ResumenDia)
+@app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
     return crud.resumen_pedidos_dia(db, fecha)
 
-# =====================
-# ENDPOINTS DE REPORTES (ejemplo)
-# =====================
+@app.get("/pedidos/resumen-general")
+def resumen_pedidos(db: Session = Depends(get_db)):
+    tz = pytz.timezone("America/Bogota")
+    hoy = datetime.now(tz).date()
+    pedidos = db.query(models.Pedido).all()
 
-@app.get("/reportes/todos_pedidos", response_model=List[PedidoOut])
-def todos_los_pedidos(db: Session = Depends(get_db)):
-    return crud.listar_todos_pedidos(db)
+    total_pedidos = len(pedidos)
+    total_hoy = sum(p.valor for p in pedidos if p.fecha == hoy)
+    total_general = sum(p.valor for p in pedidos)
+
+    return {
+        "total_pedidos": total_pedidos,
+        "total_hoy": float(total_hoy),
+        "total_general": float(total_general)
+    }
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
@@ -87,21 +93,3 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.delete(pedido)
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
-
-@app.get("/pedidos/resumen")
-def resumen_pedidos(db: Session = Depends(get_db)):
-    # Zona horaria de Colombia
-    tz = pytz.timezone("America/Bogota")
-    hoy = datetime.now(tz).date()
-
-    pedidos = db.query(models.Pedido).all()
-    
-    total_pedidos = len(pedidos)
-    total_hoy = sum(p.valor for p in pedidos if p.fecha == hoy)
-    total_general = sum(p.valor for p in pedidos)
-
-    return {
-        "total_pedidos": total_pedidos,
-        "total_hoy": total_hoy,
-        "total_general": total_general
-    }

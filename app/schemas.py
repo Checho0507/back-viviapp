@@ -1,5 +1,4 @@
-from pydantic import BaseModel, field_validator
-from pydantic import ConfigDict
+from pydantic import BaseModel, field_validator, ConfigDict, Field
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -22,14 +21,18 @@ class PedidoBase(BaseModel):
     def positive_amount(cls, v: Decimal) -> Decimal:
         if v <= 0:
             raise ValueError("El valor debe ser positivo")
-        # Normaliza a 2 decimales con redondeo bancario común
         return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+    @field_validator("descripcion")
+    @classmethod
+    def normalize_descripcion(cls, v: str | None) -> str | None:
+        if v:
+            v = v.strip()
+            return v if v else None
+        return None
+
 class PedidoCreate(PedidoBase):
-    distribuidor: str
-    fecha: date
-    valor: Decimal
-    descripcion: str | None = None
+    pass
 
 class PedidoOut(PedidoBase):
     id: int
@@ -44,4 +47,4 @@ class ResumenDia(BaseModel):
     fecha: date
     total: Decimal
     cantidad: int
-    por_distribuidor: list[ResumenDistribuidor]
+    por_distribuidor: list[ResumenDistribuidor] = Field(default_factory=list)

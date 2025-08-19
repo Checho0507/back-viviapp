@@ -1,3 +1,4 @@
+from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from datetime import date
@@ -5,13 +6,13 @@ from decimal import Decimal
 
 from . import models, schemas
 
-# Crear pedido
 
+# Crear pedido
 def crear_pedido(db: Session, data: schemas.PedidoCreate) -> models.Pedido:
     pedido = models.Pedido(
         distribuidor=data.distribuidor.strip(),
         fecha=data.fecha,
-        valor=Decimal(data.valor),  # asegura Decimal
+        valor=Decimal(data.valor),  # Asegura que sea Decimal para la DB
         descripcion=data.descripcion.strip() if data.descripcion else None
     )
     db.add(pedido)
@@ -19,9 +20,9 @@ def crear_pedido(db: Session, data: schemas.PedidoCreate) -> models.Pedido:
     db.refresh(pedido)
     return pedido
 
-# Listar pedidos por fecha
 
-def listar_pedidos_por_fecha(db: Session, fecha: date) -> list[models.Pedido]:
+# Listar pedidos por fecha
+def listar_pedidos_por_fecha(db: Session, fecha: date) -> List[models.Pedido]:
     stmt = (
         select(models.Pedido)
         .where(models.Pedido.fecha == fecha)
@@ -29,9 +30,10 @@ def listar_pedidos_por_fecha(db: Session, fecha: date) -> list[models.Pedido]:
     )
     return list(db.scalars(stmt).all())
 
-# Resumen del día
 
+# Resumen del día
 def resumen_pedidos_dia(db: Session, fecha: date) -> schemas.ResumenDia:
+    # Total y cantidad
     total_stmt = (
         select(
             func.coalesce(func.sum(models.Pedido.valor), 0),
@@ -41,6 +43,7 @@ def resumen_pedidos_dia(db: Session, fecha: date) -> schemas.ResumenDia:
     )
     total_val, count_val = db.execute(total_stmt).one()
 
+    # Agrupado por distribuidor
     dist_stmt = (
         select(
             models.Pedido.distribuidor,
