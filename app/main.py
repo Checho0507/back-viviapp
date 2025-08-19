@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, condecimal
 from datetime import date, datetime
@@ -28,13 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Logging
-logger = logging.getLogger("uvicorn.access")
+# Logging independiente para evitar errores de uvicorn.access
+logger = logging.getLogger("pedidos_logger")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Middleware para logging
 @app.middleware("http")
-async def log_requests(request, call_next):
+async def log_requests(request: Request, call_next):
     logger.info(f"Request received: {request.method} {request.url}")
     response = await call_next(request)
     logger.info(f"Response sent: {request.method} {request.url} - Status: {response.status_code}")
