@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Base de datos
-    database_url: str = "postgresql+psycopg2://admin:1234*@localhost/mibasedatos"
+    database_url: str = "postgresql+psycopg2://checho:o5936ATJxThofG2jwElI5wzZfuhpslot@dpg-d2hq9pm3jp1c738lktsg-a/pedidos_00mw?sslmode=require"
 
     # CORS
     cors_origins: List[str] = ["https://back-viviapp.onrender.com"]
