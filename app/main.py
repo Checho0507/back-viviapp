@@ -74,13 +74,25 @@ def resumen_dia(fecha: date, db: Session = Depends(get_db)):
 
 @app.get("/pedidos/resumen-general")
 def resumen_pedidos(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    from decimal import Decimal
+    
     tz = pytz.timezone("America/Bogota")
     hoy = datetime.now(tz).date()
-    pedidos = db.query(models.Pedido).all()
-
-    total_pedidos = len(pedidos)
-    total_hoy = sum(p.valor for p in pedidos if p.fecha == hoy)
-    total_general = sum(p.valor for p in pedidos)
+    
+    # Usar SQL para hacer los cálculos (más eficiente y seguro)
+    # Total de pedidos
+    total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
+    
+    # Total de hoy usando SQL
+    total_hoy = db.query(
+        func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
+    ).filter(models.Pedido.fecha == hoy).scalar()
+    
+    # Total general usando SQL
+    total_general = db.query(
+        func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
+    ).scalar()
 
     return {
         "total_pedidos": total_pedidos,
