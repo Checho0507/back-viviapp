@@ -43,8 +43,16 @@ class ResumenDistribuidor(BaseModel):
     total: Decimal
     cantidad: int
 
+    model_config = ConfigDict(
+        json_encoders={Decimal: lambda v: float(v)}  # <-- convierte Decimal a float
+    )
+
 class ResumenDia(BaseModel):
     fecha: date
     total: Decimal
     cantidad: int
     por_distribuidor: list[ResumenDistribuidor] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        json_encoders={Decimal: lambda v: float(v)}
+    )
