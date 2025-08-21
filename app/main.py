@@ -60,19 +60,19 @@ class ResumenDia(BaseModel):
 # =====================
 # ENDPOINTS
 # =====================
-@app.post("https://back-viviapp.onrender.com/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
+@app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
 
-@app.get("https://back-viviapp.onrender.com/pedidos", response_model=List[PedidoOut])
+@app.get("/pedidos", response_model=List[PedidoOut])
 def listar_pedidos(db: Session = Depends(get_db)):
     return db.query(models.Pedido).all()
 
-@app.get("https://back-viviapp.onrender.com/pedidos/resumen-dia", response_model=ResumenDia)
+@app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
     return crud.resumen_pedidos_dia(db, fecha)
 
-@app.get("https://back-viviapp.onrender.com/pedidos/resumen-general")
+@app.get("/pedidos/resumen-general")
 def resumen_pedidos(db: Session = Depends(get_db)):
     tz = pytz.timezone("America/Bogota")
     hoy = datetime.now(tz).date()
@@ -88,7 +88,7 @@ def resumen_pedidos(db: Session = Depends(get_db)):
         "total_general": float(total_general)
     }
 
-@app.delete("https://back-viviapp.onrender.com/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     pedido = db.query(models.Pedido).filter(models.Pedido.id == pedido_id).first()
     if not pedido:
