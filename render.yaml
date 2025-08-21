@@ -8,4 +8,4 @@ services:
     startCommand: "gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT"
     envVars:
       - key: DATABASE_URL
-        value: "postgresql+psycopg2://usuario:password@host:puerto/db?sslmode=require"
+        value: "postgresql+psycopg2://checho:o5936ATJxThofG2jwElI5wzZfuhpslot@dpg-d2hq9pm3jp1c738lktsg-a/pedidos_00mw?sslmode=require"
