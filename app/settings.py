@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://admin:1234*@localhost/mibasedatos"
 
     # CORS
-    cors_origins: List[str] = ["http://localhost:5173"]
+    cors_origins: List[str] = ["https://back-viviapp.onrender.com"]
 
     # Zona horaria de la app
     app_tz: str = "America/Bogota"

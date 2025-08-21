@@ -16,8 +16,8 @@ app = FastAPI(title="Pedidos API", version="1.0")
 
 # CORS
 origins = [
-    "http://localhost:5173",
-    "https://tu-frontend.vercel.app"
+    "https://back-viviapp.onrender.com",
+    "https://front-viviapp.vercel.app"
 ]
 
 app.add_middleware(
