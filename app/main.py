@@ -154,16 +154,17 @@ async def exportar_pagados():
         pagados = load_pagados()
         if not pagados:
             raise HTTPException(status_code=404, detail="No hay pedidos pagados")
-        
-        # Convertimos a Excel
-        df = pd.DataFrame(pagados)
+
+        # Convertir a Excel
         excel_file = "pagados.xlsx"
+        df = pd.DataFrame(pagados)
         df.to_excel(excel_file, index=False)
 
-        with open(excel_file, "rb") as f:
-            return {
-                "filename": excel_file,
-                "content": f.read()
-            }
+        # Retornar archivo para descarga
+        return FileResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="pagados.xlsx"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error exportando: {str(e)}")
