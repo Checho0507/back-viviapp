@@ -8,6 +8,18 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app import crud, models
 import logging
+import json
+import os
+from fastapi.responses import FileResponse
+import pandas as pd
+
+PAGADOS_FILE = "pagados.json"
+
+# Asegurar que el archivo exista
+if not os.path.exists(PAGADOS_FILE):
+    with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f, ensure_ascii=False, indent=4)
+
 
 # =====================
 # CONFIGURACIÓN DE LA APP
@@ -108,3 +120,33 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.delete(pedido)
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
+
+@app.post("/pagados/agregar")
+def agregar_pagado(pedido: PedidoOut):
+    try:
+        with open(PAGADOS_FILE, "r+", encoding="utf-8") as f:
+            data = json.load(f)
+            data.append(pedido.dict())
+            f.seek(0)
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        return {"message": "Pedido agregado a pagados"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error guardando pagado: {str(e)}")
+
+@app.get("/pagados/exportar")
+def exportar_pagados():
+    try:
+        with open(PAGADOS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not data:
+            raise HTTPException(status_code=404, detail="No hay pedidos pagados para exportar")
+
+        df = pd.DataFrame(data)
+        excel_file = "pagados.xlsx"
+        df.to_excel(excel_file, index=False)
+
+        return FileResponse(excel_file, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            filename="pagados.xlsx")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exportando Excel: {str(e)}")
