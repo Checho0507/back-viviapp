@@ -121,32 +121,49 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
 
+def load_pagados():
+    if os.path.exists(PAGADOS_FILE):
+        try:
+            with open(PAGADOS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                else:
+                    return []  # Si hay algo raro, devolvemos lista vacía
+        except json.JSONDecodeError:
+            return []
+    return []
+
+def save_pagados(pagados):
+    with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
+        json.dump(pagados, f, ensure_ascii=False, indent=2)
+
 @app.post("/pagados/agregar")
-def agregar_pagado(pedido: PedidoOut):
+async def agregar_pagado(pedido: dict):
     try:
-        with open(PAGADOS_FILE, "r+", encoding="utf-8") as f:
-            data = json.load(f)
-            data.append(pedido.dict())
-            f.seek(0)
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        return {"message": "Pedido agregado a pagados"}
+        pagados = load_pagados()
+        pagados.append(pedido)
+        save_pagados(pagados)
+        return {"message": "Pagado agregado correctamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error guardando pagado: {str(e)}")
 
 @app.get("/pagados/exportar")
-def exportar_pagados():
+async def exportar_pagados():
     try:
-        with open(PAGADOS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not data:
-            raise HTTPException(status_code=404, detail="No hay pedidos pagados para exportar")
-
-        df = pd.DataFrame(data)
+        pagados = load_pagados()
+        if not pagados:
+            raise HTTPException(status_code=404, detail="No hay pedidos pagados")
+        
+        # Convertimos a Excel
+        df = pd.DataFrame(pagados)
         excel_file = "pagados.xlsx"
         df.to_excel(excel_file, index=False)
 
-        return FileResponse(excel_file, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            filename="pagados.xlsx")
+        with open(excel_file, "rb") as f:
+            return {
+                "filename": excel_file,
+                "content": f.read()
+            }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exportando Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error exportando: {str(e)}")
