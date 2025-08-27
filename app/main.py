@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, condecimal
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import List
+import pytz
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import crud, models
@@ -14,19 +15,11 @@ import pandas as pd
 
 PAGADOS_FILE = "pagados.json"
 
-# =====================
-# CONFIGURACIÓN DE VARIABLES DE ENTORNO
-# =====================
-APP_TZ = os.getenv("APP_TZ", "America/Bogota")  # Default Colombia
-# Ajuste de diferencia horaria: Colombia está en UTC-5
-TZ_OFFSET = -5 if APP_TZ == "America/Bogota" else 0  # Podrías parametrizar para otras zonas
-
-# =====================
-# ARCHIVO PAGADOS
-# =====================
+# Asegurar que el archivo exista
 if not os.path.exists(PAGADOS_FILE):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
+
 
 # =====================
 # CONFIGURACIÓN DE LA APP
@@ -34,7 +27,11 @@ if not os.path.exists(PAGADOS_FILE):
 app = FastAPI(title="Pedidos API", version="1.0")
 
 # CORS
-origins = os.getenv("CORS_ORIGINS", "").split(",")
+origins = [
+    "https://back-viviapp.onrender.com",
+    "https://front-viviapp.vercel.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -43,7 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Logging
+# Logging independiente para evitar errores de uvicorn.access
 logger = logging.getLogger("pedidos_logger")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -75,7 +72,6 @@ class ResumenDia(BaseModel):
 # =====================
 # ENDPOINTS
 # =====================
-
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
@@ -93,14 +89,19 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
     
-    # Fecha actual en UTC ajustada a Colombia
-    hoy = (datetime.utcnow() + timedelta(hours=TZ_OFFSET)).date()
+    tz = pytz.timezone("America/Bogota")
+    hoy = datetime.now(tz).date()
     
+    # Usar SQL para hacer los cálculos (más eficiente y seguro)
+    # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
+    
+    # Total de hoy usando SQL
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).filter(models.Pedido.fecha == hoy).scalar()
     
+    # Total general usando SQL
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
@@ -108,8 +109,7 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     return {
         "total_pedidos": total_pedidos,
         "total_hoy": float(total_hoy),
-        "total_general": float(total_general),
-        "fecha_consulta": str(hoy)
+        "total_general": float(total_general)
     }
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -121,9 +121,6 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
 
-# =====================
-# PAGADOS (JSON y Excel)
-# =====================
 def load_pagados():
     if os.path.exists(PAGADOS_FILE):
         try:
@@ -132,7 +129,7 @@ def load_pagados():
                 if isinstance(data, list):
                     return data
                 else:
-                    return []
+                    return []  # Si hay algo raro, devolvemos lista vacía
         except json.JSONDecodeError:
             return []
     return []
@@ -158,10 +155,12 @@ async def exportar_pagados():
         if not pagados:
             raise HTTPException(status_code=404, detail="No hay pedidos pagados")
 
+        # Convertir a Excel
         excel_file = "pagados.xlsx"
         df = pd.DataFrame(pagados)
         df.to_excel(excel_file, index=False)
 
+        # Retornar archivo para descarga
         return FileResponse(
             excel_file,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
