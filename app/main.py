@@ -4,7 +4,7 @@ from pydantic import BaseModel, condecimal
 from datetime import date, datetime, timedelta, timezone
 from typing import List
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from app.database import get_db
 from app import crud, models, schemas
 import logging
@@ -80,7 +80,31 @@ class ResumenDia(BaseModel):
 def fecha_colombia() -> date:
     """Devuelve la fecha actual en Colombia (UTC-5)."""
     ahora_utc = datetime.now(timezone.utc)
-    return (ahora_utc - timedelta(hours=5)).date()
+    colombia_time = ahora_utc - timedelta(hours=5)
+    return colombia_time.date()
+
+
+def datetime_colombia() -> datetime:
+    """Devuelve el datetime actual en Colombia (UTC-5)."""
+    ahora_utc = datetime.now(timezone.utc)
+    return ahora_utc - timedelta(hours=5)
+
+
+def get_colombia_day_range(fecha_colombia: date) -> tuple[datetime, datetime]:
+    """
+    Retorna el rango de datetime para un día específico en horario de Colombia.
+    Convierte las 00:00:00 y 23:59:59 de Colombia a UTC para comparar con la BD.
+    """
+    # Inicio del día en Colombia (00:00:00)
+    inicio_dia_colombia = datetime.combine(fecha_colombia, datetime.min.time())
+    # Final del día en Colombia (23:59:59.999999)
+    final_dia_colombia = datetime.combine(fecha_colombia, datetime.max.time())
+    
+    # Si tu BD almacena en UTC, convertir a UTC sumando 5 horas
+    inicio_dia_utc = inicio_dia_colombia + timedelta(hours=5)
+    final_dia_utc = final_dia_colombia + timedelta(hours=5)
+    
+    return inicio_dia_utc, final_dia_utc
 
 
 # =====================
@@ -98,11 +122,19 @@ def listar_pedidos(db: Session = Depends(get_db)):
 
 @app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
-    # Total y cantidad
+    # Obtener el rango de datetime para el día específico en horario de Colombia
+    inicio_dia, final_dia = get_colombia_day_range(fecha)
+    
+    # Total y cantidad usando el rango de datetime
     total_val, count_val = db.query(
         func.coalesce(func.sum(models.Pedido.valor), 0),
         func.count(models.Pedido.id),
-    ).filter(func.date(models.Pedido.fecha) == fecha).one()
+    ).filter(
+        and_(
+            models.Pedido.fecha >= inicio_dia,
+            models.Pedido.fecha <= final_dia
+        )
+    ).one()
 
     return ResumenDia(
         fecha=fecha,
@@ -115,25 +147,40 @@ def resumen_dia(fecha: date, db: Session = Depends(get_db)):
 def resumen_pedidos(db: Session = Depends(get_db)):
     from decimal import Decimal
 
+    # Obtener la fecha actual de Colombia
     hoy_colombia = fecha_colombia()
+    
+    # Obtener el rango de datetime para hoy en horario de Colombia
+    inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
 
     # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
 
-    # Total de hoy (comparar solo la fecha)
+    # Total de hoy usando el rango de datetime correcto
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-    ).filter(func.date(models.Pedido.fecha) == hoy_colombia).scalar()
+    ).filter(
+        and_(
+            models.Pedido.fecha >= inicio_hoy,
+            models.Pedido.fecha <= final_hoy
+        )
+    ).scalar()
 
     # Total general
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
 
+    # Log para debugging
+    logger.info(f"Fecha Colombia hoy: {hoy_colombia}")
+    logger.info(f"Rango UTC para consulta: {inicio_hoy} - {final_hoy}")
+    logger.info(f"Total hoy calculado: {total_hoy}")
+
     return {
         "total_pedidos": total_pedidos,
-        "total_hoy": float(total_hoy),
-        "total_general": float(total_general)
+        "total_hoy": float(total_hoy) if total_hoy else 0.0,
+        "total_general": float(total_general) if total_general else 0.0,
+        "fecha_colombia": hoy_colombia.isoformat()  # Para debugging
     }
 
 
