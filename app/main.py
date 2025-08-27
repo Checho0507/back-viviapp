@@ -135,14 +135,11 @@ def fecha_colombia_to_datetime_utc(fecha_colombia: date, hora_colombia: str = "1
     CORRECCIÓN: Colombia es UTC-5, por lo que para convertir a UTC sumamos 5 horas.
     """
     # Crear datetime en horario de Colombia
-    hora_obj = datetime.strptime(hora_colombia, "%H:%M:%S").time()
-    datetime_colombia = datetime.combine(fecha_colombia, hora_obj)
     
     # Convertir a UTC: Colombia es UTC-5, sumamos 5 horas para obtener UTC
-    datetime_utc = datetime_colombia + timedelta(hours=5)
     
-    logger.info(f"Fecha Colombia: {fecha_colombia} {hora_colombia} -> DateTime UTC: {datetime_utc}")
-    return datetime_utc
+    logger.info(f"Fecha Colombia: {fecha_colombia} {hora_colombia} -> DateTime UTC: {fecha_colombia}")
+    return fecha_colombia
 
 
 def datetime_utc_to_colombia(datetime_utc: datetime) -> datetime:
