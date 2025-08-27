@@ -12,6 +12,12 @@ import json
 import os
 from fastapi.responses import FileResponse
 import pandas as pd
+from dotenv import load_dotenv  # ✅ para leer .env
+
+# =====================
+# CARGAR VARIABLES DE ENTORNO
+# =====================
+load_dotenv()  # Carga las variables del archivo .env
 
 PAGADOS_FILE = "pagados.json"
 
@@ -20,21 +26,29 @@ if not os.path.exists(PAGADOS_FILE):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
 
+# Leer configuración desde .env
+DATABASE_URL = os.getenv("DATABASE_URL")
+APP_TZ = os.getenv("APP_TZ", "America/Bogota")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [
+    "https://back-viviapp.onrender.com",
+    "https://front-viviapp.vercel.app"
+]
+
+# Configurar zona horaria
+try:
+    tz = pytz.timezone(APP_TZ)
+except pytz.UnknownTimeZoneError:
+    tz = pytz.timezone("America/Bogota")  # fallback por defecto
 
 # =====================
 # CONFIGURACIÓN DE LA APP
 # =====================
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# CORS
-origins = [
-    "https://back-viviapp.onrender.com",
-    "https://front-viviapp.vercel.app"
-]
-
+# Configuración CORS dinámica
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,19 +103,14 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
     
-    tz = pytz.timezone("America/Bogota")
     hoy = datetime.now(tz).date()
     
-    # Usar SQL para hacer los cálculos (más eficiente y seguro)
-    # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
     
-    # Total de hoy usando SQL
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).filter(models.Pedido.fecha == hoy).scalar()
     
-    # Total general usando SQL
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
@@ -155,12 +164,10 @@ async def exportar_pagados():
         if not pagados:
             raise HTTPException(status_code=404, detail="No hay pedidos pagados")
 
-        # Convertir a Excel
         excel_file = "pagados.xlsx"
         df = pd.DataFrame(pagados)
         df.to_excel(excel_file, index=False)
 
-        # Retornar archivo para descarga
         return FileResponse(
             excel_file,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
