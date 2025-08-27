@@ -88,20 +88,21 @@ def resumen_dia(fecha: date, db: Session = Depends(get_db)):
 def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
-    
-    tz = pytz.timezone("America/Bogota")
-    hoy = datetime.now(tz).date()
-    
-    # Usar SQL para hacer los cálculos (más eficiente y seguro)
+    from datetime import datetime, timedelta, timezone
+
+    # Obtener hora actual en UTC y restar 5 horas (hora Colombia)
+    ahora_utc = datetime.now(timezone.utc)
+    hoy_colombia = (ahora_utc - timedelta(hours=5)).date()
+
     # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
-    
-    # Total de hoy usando SQL
+
+    # Total de hoy (ajustado a fecha Colombia)
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-    ).filter(models.Pedido.fecha == hoy).scalar()
-    
-    # Total general usando SQL
+    ).filter(models.Pedido.fecha == hoy_colombia).scalar()
+
+    # Total general
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
@@ -111,6 +112,7 @@ def resumen_pedidos(db: Session = Depends(get_db)):
         "total_hoy": float(total_hoy),
         "total_general": float(total_general)
     }
+
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
