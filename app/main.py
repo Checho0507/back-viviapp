@@ -15,19 +15,29 @@ import pandas as pd
 
 PAGADOS_FILE = "pagados.json"
 
+# =====================
+# CONFIGURACIÓN GLOBAL
+# =====================
+
 # Asegurar que el archivo exista
 if not os.path.exists(PAGADOS_FILE):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
 
+# Leer la zona horaria desde variable de entorno
+APP_TZ = os.getenv("APP_TZ", "America/Bogota")  # Valor por defecto si no existe
+try:
+    tz = pytz.timezone(APP_TZ)
+except pytz.UnknownTimeZoneError:
+    tz = pytz.timezone("America/Bogota")  # fallback
 
 # =====================
 # CONFIGURACIÓN DE LA APP
 # =====================
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# CORS
-origins = [
+# CORS (leer también de entorno si quieres)
+origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [
     "https://back-viviapp.onrender.com",
     "https://front-viviapp.vercel.app"
 ]
@@ -89,19 +99,15 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
     
-    tz = pytz.timezone("America/Bogota")
     hoy = datetime.now(tz).date()
     
     # Usar SQL para hacer los cálculos (más eficiente y seguro)
-    # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
     
-    # Total de hoy usando SQL
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).filter(models.Pedido.fecha == hoy).scalar()
     
-    # Total general usando SQL
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
@@ -155,12 +161,10 @@ async def exportar_pagados():
         if not pagados:
             raise HTTPException(status_code=404, detail="No hay pedidos pagados")
 
-        # Convertir a Excel
         excel_file = "pagados.xlsx"
         df = pd.DataFrame(pagados)
         df.to_excel(excel_file, index=False)
 
-        # Retornar archivo para descarga
         return FileResponse(
             excel_file,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
