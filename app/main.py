@@ -67,7 +67,7 @@ class PedidoCreate(BaseModel):
     @classmethod
     def validate_fecha(cls, v):
         """
-        Asegura que la fecha recibida se interprete correctamente como fecha de Colombia.
+        Asegura que la fecha recibida se interprete correctamente.
         """
         if isinstance(v, str):
             # Si viene como string, parsearlo como fecha
@@ -95,7 +95,7 @@ class ResumenDia(BaseModel):
 
 
 # =====================
-# HELPERS
+# HELPERS SIMPLIFICADOS
 # =====================
 def fecha_colombia() -> date:
     """Devuelve la fecha actual en Colombia (UTC-5)."""
@@ -104,43 +104,17 @@ def fecha_colombia() -> date:
     return colombia_time.date()
 
 
-def datetime_colombia() -> datetime:
-    """Devuelve el datetime actual en Colombia (UTC-5)."""
-    ahora_utc = datetime.now(timezone.utc)
-    return ahora_utc - timedelta(hours=5)
-
-
-def get_colombia_day_range(fecha_colombia: date) -> tuple[datetime, datetime]:
+def get_day_range(fecha_local: date) -> tuple[datetime, datetime]:
     """
-    Retorna el rango de datetime para un día específico en horario de Colombia.
-    Convierte las 00:00:00 y 23:59:59 de Colombia a UTC para comparar con la BD.
+    Retorna el rango de datetime para un día específico SIN conversiones de timezone.
+    Busca desde las 00:00:00 hasta las 23:59:59 del día especificado.
     """
-    # Inicio del día en Colombia (00:00:00)
-    inicio_dia_colombia = datetime.combine(fecha_colombia, datetime.min.time())
-    # Final del día en Colombia (23:59:59.999999)
-    final_dia_colombia = datetime.combine(fecha_colombia, datetime.max.time())
+    inicio_dia = datetime.combine(fecha_local, datetime.min.time())
+    final_dia = datetime.combine(fecha_local, datetime.max.time())
     
-    # Si tu BD almacena en UTC, convertir a UTC sumando 5 horas
-    inicio_dia_utc = inicio_dia_colombia + timedelta(hours=5)
-    final_dia_utc = final_dia_colombia + timedelta(hours=5)
+    logger.info(f"Rango de búsqueda para fecha {fecha_local}: {inicio_dia} - {final_dia}")
     
-    return inicio_dia_utc, final_dia_utc
-
-
-def fecha_colombia_to_datetime_utc(fecha_colombia: date, hora_colombia: str = "12:00:00") -> datetime:
-    """
-    Convierte una fecha de Colombia a datetime UTC para almacenar en la BD.
-    Usa mediodía por defecto para evitar problemas de zona horaria.
-    """
-    # Crear datetime en horario de Colombia
-    hora_obj = datetime.strptime(hora_colombia, "%H:%M:%S").time()
-    datetime_colombia = datetime.combine(fecha_colombia, hora_obj)
-    
-    # Convertir a UTC sumando 5 horas
-    datetime_utc = datetime_colombia + timedelta(hours=5)
-    
-    logger.info(f"Fecha Colombia: {fecha_colombia} -> DateTime UTC: {datetime_utc}")
-    return datetime_utc
+    return inicio_dia, final_dia
 
 
 # =====================
@@ -149,19 +123,19 @@ def fecha_colombia_to_datetime_utc(fecha_colombia: date, hora_colombia: str = "1
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     try:
-        # Log para debugging
-        logger.info(f"Creando pedido con fecha original: {pedido.fecha}")
+        logger.info(f"Creando pedido con fecha: {pedido.fecha}")
         
-        # Convertir la fecha de Colombia a datetime UTC para la BD
-        fecha_utc = fecha_colombia_to_datetime_utc(pedido.fecha)
+        # Usar la fecha tal como viene, sin conversiones de timezone
+        # Convertir a datetime usando mediodía para evitar problemas de bordes
+        fecha_datetime = datetime.combine(pedido.fecha, datetime.min.time().replace(hour=12))
         
-        logger.info(f"Fecha convertida para BD: {fecha_utc}")
+        logger.info(f"Fecha datetime para BD: {fecha_datetime}")
         
         # Crear el pedido directamente usando el modelo de SQLAlchemy
         db_pedido = models.Pedido(
             distribuidor=pedido.distribuidor,
             valor=pedido.valor,
-            fecha=fecha_utc,
+            fecha=fecha_datetime,
             descripcion=pedido.descripcion
         )
         
@@ -170,15 +144,12 @@ def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(db_pedido)
         
-        # Convertir la respuesta de vuelta a fecha de Colombia para el frontend
-        fecha_colombia_response = (fecha_utc - timedelta(hours=5)).date()
-        
-        # Retornar la respuesta con la fecha de Colombia
+        # Retornar la respuesta con la fecha original
         return PedidoOut(
             id=db_pedido.id,
             distribuidor=db_pedido.distribuidor,
             valor=db_pedido.valor,
-            fecha=fecha_colombia_response,
+            fecha=pedido.fecha,  # Fecha original sin conversiones
             descripcion=db_pedido.descripcion
         )
         
@@ -193,21 +164,21 @@ def listar_pedidos(db: Session = Depends(get_db)):
     try:
         pedidos = db.query(models.Pedido).all()
         
-        # Convertir las fechas UTC de la BD a fechas de Colombia para la respuesta
+        # Convertir las fechas datetime de la BD a fechas para la respuesta
         pedidos_response = []
         for pedido in pedidos:
-            # Convertir fecha UTC a fecha Colombia
+            # Extraer solo la fecha del datetime
             if isinstance(pedido.fecha, datetime):
-                fecha_colombia = (pedido.fecha - timedelta(hours=5)).date()
+                fecha_response = pedido.fecha.date()
             else:
-                fecha_colombia = pedido.fecha
+                fecha_response = pedido.fecha
             
             pedido_out = PedidoOut(
                 id=pedido.id,
                 distribuidor=pedido.distribuidor,
                 valor=pedido.valor,
                 descripcion=pedido.descripcion,
-                fecha=fecha_colombia
+                fecha=fecha_response
             )
             pedidos_response.append(pedido_out)
         
@@ -221,11 +192,11 @@ def listar_pedidos(db: Session = Depends(get_db)):
 @app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
     try:
-        # Obtener el rango de datetime para el día específico en horario de Colombia
-        inicio_dia, final_dia = get_colombia_day_range(fecha)
+        # Obtener el rango de datetime para el día específico
+        inicio_dia, final_dia = get_day_range(fecha)
         
-        logger.info(f"Consultando resumen para fecha Colombia: {fecha}")
-        logger.info(f"Rango UTC para consulta: {inicio_dia} - {final_dia}")
+        logger.info(f"Consultando resumen para fecha: {fecha}")
+        logger.info(f"Rango para consulta: {inicio_dia} - {final_dia}")
         
         # Total y cantidad usando el rango de datetime
         total_val, count_val = db.query(
@@ -237,6 +208,8 @@ def resumen_dia(fecha: date, db: Session = Depends(get_db)):
                 models.Pedido.fecha <= final_dia
             )
         ).one()
+
+        logger.info(f"Resultado: total={total_val}, cantidad={count_val}")
 
         return ResumenDia(
             fecha=fecha,
@@ -257,8 +230,8 @@ def resumen_pedidos(db: Session = Depends(get_db)):
         # Obtener la fecha actual de Colombia
         hoy_colombia = fecha_colombia()
         
-        # Obtener el rango de datetime para hoy en horario de Colombia
-        inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
+        # Obtener el rango de datetime para hoy
+        inicio_hoy, final_hoy = get_day_range(hoy_colombia)
 
         # Total de pedidos
         total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
@@ -280,7 +253,7 @@ def resumen_pedidos(db: Session = Depends(get_db)):
 
         # Log para debugging
         logger.info(f"Fecha Colombia hoy: {hoy_colombia}")
-        logger.info(f"Rango UTC para consulta: {inicio_hoy} - {final_hoy}")
+        logger.info(f"Rango para consulta de hoy: {inicio_hoy} - {final_hoy}")
         logger.info(f"Total hoy calculado: {total_hoy}")
 
         return {
