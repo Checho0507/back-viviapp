@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, condecimal, field_validator
+from pydantic import BaseModel, condecimal
 from datetime import date, datetime, timedelta, timezone
 from typing import List
 from sqlalchemy.orm import Session
@@ -63,26 +63,6 @@ class PedidoCreate(BaseModel):
     fecha: date
     descripcion: str | None = None
 
-    @field_validator('fecha')
-    @classmethod
-    def validate_fecha(cls, v):
-        """
-        Asegura que la fecha recibida se interprete correctamente como fecha de Colombia.
-        """
-        if isinstance(v, str):
-            # Si viene como string, parsearlo como fecha
-            try:
-                parsed_date = datetime.strptime(v, '%Y-%m-%d').date()
-                logger.info(f"Fecha parseada desde string: {parsed_date}")
-                return parsed_date
-            except ValueError:
-                raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
-        elif isinstance(v, date):
-            logger.info(f"Fecha recibida como date: {v}")
-            return v
-        else:
-            raise ValueError("La fecha debe ser un string en formato YYYY-MM-DD o un objeto date")
-
 
 class PedidoOut(PedidoCreate):
     id: int
@@ -120,7 +100,7 @@ def get_colombia_day_range(fecha_colombia: date) -> tuple[datetime, datetime]:
     # Final del día en Colombia (23:59:59.999999)
     final_dia_colombia = datetime.combine(fecha_colombia, datetime.max.time())
     
-    # Convertir a UTC: Colombia es UTC-5, por lo que sumamos 5 horas para obtener UTC
+    # Si tu BD almacena en UTC, convertir a UTC sumando 5 horas
     inicio_dia_utc = inicio_dia_colombia + timedelta(hours=5)
     final_dia_utc = final_dia_colombia + timedelta(hours=5)
     
@@ -132,77 +112,29 @@ def get_colombia_day_range(fecha_colombia: date) -> tuple[datetime, datetime]:
 # =====================
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
-    # Log para debugging
-    logger.info(f"Creando pedido con fecha Colombia: {pedido.fecha}")
-    
-    # Crear el pedido directamente con la fecha como está (date, no datetime)
-    # No necesitamos conversiones de zona horaria para fechas simples
-    pedido_creado = crud.crear_pedido(db, pedido)
-    
-    logger.info(f"Pedido creado con fecha: {pedido_creado.fecha}")
-    
-    return pedido_creado
+    return crud.crear_pedido(db, pedido)
 
 
 @app.get("/pedidos", response_model=List[PedidoOut])
 def listar_pedidos(db: Session = Depends(get_db)):
-    pedidos = db.query(models.Pedido).all()
-    
-    # Convertir a la estructura de respuesta
-    pedidos_response = []
-    for pedido in pedidos:
-        # Asegurar que la fecha sea de tipo date
-        if isinstance(pedido.fecha, datetime):
-            # Si por alguna razón está como datetime, extraer solo la fecha
-            fecha_final = pedido.fecha.date()
-        else:
-            # Si ya es date, usarla directamente
-            fecha_final = pedido.fecha
-            
-        pedido_dict = {
-            "id": pedido.id,
-            "distribuidor": pedido.distribuidor,
-            "valor": pedido.valor,
-            "descripcion": pedido.descripcion,
-            "fecha": fecha_final
-        }
-        
-        pedidos_response.append(PedidoOut(**pedido_dict))
-    
-    return pedidos_response
+    return db.query(models.Pedido).all()
 
 
 @app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
-    logger.info(f"Consultando resumen para fecha: {fecha}")
+    # Obtener el rango de datetime para el día específico en horario de Colombia
+    inicio_dia, final_dia = get_colombia_day_range(fecha)
     
-    # Si las fechas en BD son de tipo date, hacer comparación directa
-    # Si son datetime, usar el rango de datetime
-    try:
-        # Intentar primero comparación directa con date
-        total_val, count_val = db.query(
-            func.coalesce(func.sum(models.Pedido.valor), 0),
-            func.count(models.Pedido.id),
-        ).filter(
-            models.Pedido.fecha == fecha
-        ).one()
-        
-        logger.info(f"Consulta directa por fecha exitosa: total={total_val}, count={count_val}")
-        
-    except Exception as e:
-        # Si falla, usar el rango de datetime para compatibilidad
-        logger.info(f"Consulta directa falló, usando rango datetime: {e}")
-        inicio_dia, final_dia = get_colombia_day_range(fecha)
-        
-        total_val, count_val = db.query(
-            func.coalesce(func.sum(models.Pedido.valor), 0),
-            func.count(models.Pedido.id),
-        ).filter(
-            and_(
-                models.Pedido.fecha >= inicio_dia,
-                models.Pedido.fecha <= final_dia
-            )
-        ).one()
+    # Total y cantidad usando el rango de datetime
+    total_val, count_val = db.query(
+        func.coalesce(func.sum(models.Pedido.valor), 0),
+        func.count(models.Pedido.id),
+    ).filter(
+        and_(
+            models.Pedido.fecha >= inicio_dia,
+            models.Pedido.fecha <= final_dia
+        )
+    ).one()
 
     return ResumenDia(
         fecha=fecha,
@@ -218,46 +150,37 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     # Obtener la fecha actual de Colombia
     hoy_colombia = fecha_colombia()
     
+    # Obtener el rango de datetime para hoy en horario de Colombia
+    inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
+
     # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
 
-    # Total de hoy - intentar comparación directa primero
-    try:
-        total_hoy = db.query(
-            func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-        ).filter(
-            models.Pedido.fecha == hoy_colombia
-        ).scalar()
-        
-        logger.info(f"Consulta directa para hoy exitosa: {total_hoy}")
-        
-    except Exception as e:
-        # Si falla, usar rango datetime
-        logger.info(f"Consulta directa para hoy falló, usando rango: {e}")
-        inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
-        
-        total_hoy = db.query(
-            func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-        ).filter(
-            and_(
-                models.Pedido.fecha >= inicio_hoy,
-                models.Pedido.fecha <= final_hoy
-            )
-        ).scalar()
+    # Total de hoy usando el rango de datetime correcto
+    total_hoy = db.query(
+        func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
+    ).filter(
+        and_(
+            models.Pedido.fecha >= inicio_hoy,
+            models.Pedido.fecha <= final_hoy
+        )
+    ).scalar()
 
     # Total general
     total_general = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).scalar()
 
+    # Log para debugging
     logger.info(f"Fecha Colombia hoy: {hoy_colombia}")
+    logger.info(f"Rango UTC para consulta: {inicio_hoy} - {final_hoy}")
     logger.info(f"Total hoy calculado: {total_hoy}")
 
     return {
         "total_pedidos": total_pedidos,
         "total_hoy": float(total_hoy) if total_hoy else 0.0,
         "total_general": float(total_general) if total_general else 0.0,
-        "fecha_colombia": hoy_colombia.isoformat()
+        "fecha_colombia": hoy_colombia.isoformat()  # Para debugging
     }
 
 
