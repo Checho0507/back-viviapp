@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, condecimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import List
-import pytz
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.database import get_db
-from app import crud, models
+from app import crud, models, schemas
 import logging
 import json
 import os
@@ -44,6 +44,7 @@ app.add_middleware(
 logger = logging.getLogger("pedidos_logger")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+
 # Middleware para logging
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -51,6 +52,7 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     logger.info(f"Response sent: {request.method} {request.url} - Status: {response.status_code}")
     return response
+
 
 # =====================
 # MODELOS (Schemas)
@@ -61,13 +63,25 @@ class PedidoCreate(BaseModel):
     fecha: date
     descripcion: str | None = None
 
+
 class PedidoOut(PedidoCreate):
     id: int
+
 
 class ResumenDia(BaseModel):
     fecha: date
     total: condecimal(max_digits=12, decimal_places=2)  # type: ignore
     cantidad: int
+
+
+# =====================
+# HELPERS
+# =====================
+def fecha_colombia() -> date:
+    """Devuelve la fecha actual en Colombia (UTC-5)."""
+    ahora_utc = datetime.now(timezone.utc)
+    return (ahora_utc - timedelta(hours=5)).date()
+
 
 # =====================
 # ENDPOINTS
@@ -76,31 +90,40 @@ class ResumenDia(BaseModel):
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
 
+
 @app.get("/pedidos", response_model=List[PedidoOut])
 def listar_pedidos(db: Session = Depends(get_db)):
     return db.query(models.Pedido).all()
 
+
 @app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
-    return crud.resumen_pedidos_dia(db, fecha)
+    # Total y cantidad
+    total_val, count_val = db.query(
+        func.coalesce(func.sum(models.Pedido.valor), 0),
+        func.count(models.Pedido.id),
+    ).filter(func.date(models.Pedido.fecha) == fecha).one()
+
+    return ResumenDia(
+        fecha=fecha,
+        total=total_val,
+        cantidad=count_val
+    )
+
 
 @app.get("/pedidos/resumen-general")
 def resumen_pedidos(db: Session = Depends(get_db)):
-    from sqlalchemy import func
     from decimal import Decimal
-    from datetime import datetime, timedelta, timezone
 
-    # Obtener hora actual en UTC y restar 5 horas (hora Colombia)
-    ahora_utc = datetime.now(timezone.utc)
-    hoy_colombia = (ahora_utc - timedelta(hours=5)).date()
+    hoy_colombia = fecha_colombia()
 
     # Total de pedidos
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
 
-    # Total de hoy (ajustado a fecha Colombia)
+    # Total de hoy (comparar solo la fecha)
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-    ).filter(models.Pedido.fecha == hoy_colombia).scalar()
+    ).filter(func.date(models.Pedido.fecha) == hoy_colombia).scalar()
 
     # Total general
     total_general = db.query(
@@ -123,6 +146,10 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
 
+
+# =====================
+# PAGADOS
+# =====================
 def load_pagados():
     if os.path.exists(PAGADOS_FILE):
         try:
@@ -136,9 +163,11 @@ def load_pagados():
             return []
     return []
 
+
 def save_pagados(pagados):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump(pagados, f, ensure_ascii=False, indent=2)
+
 
 @app.post("/pagados/agregar")
 async def agregar_pagado(pedido: dict):
@@ -149,6 +178,7 @@ async def agregar_pagado(pedido: dict):
         return {"message": "Pagado agregado correctamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error guardando pagado: {str(e)}")
+
 
 @app.get("/pagados/exportar")
 async def exportar_pagados():

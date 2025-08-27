@@ -30,27 +30,28 @@ def listar_pedidos_por_fecha(db: Session, fecha: date) -> List[models.Pedido]:
     )
     return list(db.scalars(stmt).all())
 
+from sqlalchemy import select, func
+from datetime import date
 
-# Resumen del día
 def resumen_pedidos_dia(db: Session, fecha: date) -> schemas.ResumenDia:
-    # Total y cantidad
+    # Total y cantidad (forzamos comparación por fecha sin hora)
     total_stmt = (
         select(
             func.coalesce(func.sum(models.Pedido.valor), 0),
             func.count(models.Pedido.id),
         )
-        .where(models.Pedido.fecha == fecha)
+        .where(func.date(models.Pedido.fecha) == fecha)
     )
     total_val, count_val = db.execute(total_stmt).one()
 
-    # Agrupado por distribuidor
+    # Agrupado por distribuidor (también filtramos por fecha sin hora)
     dist_stmt = (
         select(
             models.Pedido.distribuidor,
             func.coalesce(func.sum(models.Pedido.valor), 0),
             func.count(models.Pedido.id),
         )
-        .where(models.Pedido.fecha == fecha)
+        .where(func.date(models.Pedido.fecha) == fecha)
         .group_by(models.Pedido.distribuidor)
         .order_by(models.Pedido.distribuidor)
     )
