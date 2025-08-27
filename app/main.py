@@ -111,8 +111,20 @@ def get_colombia_day_range(fecha_colombia: date) -> tuple[datetime, datetime]:
 # ENDPOINTS
 # =====================
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
-def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
-    return crud.crear_pedido(db, pedido)
+def crear_pedido(db: Session, pedido: PedidoCreate):
+    fecha_col = datetime.combine(pedido.fecha, datetime.min.time())  # 00:00 hora local
+    # Convertir a UTC para la BD si es necesario:
+    fecha_utc = fecha_col + timedelta(hours=5)  # Colombia -> UTC
+    nuevo_pedido = models.Pedido(
+        distribuidor=pedido.distribuidor,
+        valor=pedido.valor,
+        fecha=fecha_utc,
+        descripcion=pedido.descripcion
+    )
+    db.add(nuevo_pedido)
+    db.commit()
+    db.refresh(nuevo_pedido)
+    return nuevo_pedido
 
 
 @app.get("/pedidos", response_model=List[PedidoOut])
