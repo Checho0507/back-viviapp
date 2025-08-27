@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, condecimal
 from datetime import date, datetime, timedelta
 from typing import List
-import pytz
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import crud, models
@@ -15,7 +14,16 @@ import pandas as pd
 
 PAGADOS_FILE = "pagados.json"
 
-# Asegurar que el archivo exista
+# =====================
+# CONFIGURACIÓN DE VARIABLES DE ENTORNO
+# =====================
+APP_TZ = os.getenv("APP_TZ", "America/Bogota")  # Default Colombia
+# Ajuste de diferencia horaria: Colombia está en UTC-5
+TZ_OFFSET = -5 if APP_TZ == "America/Bogota" else 0  # Podrías parametrizar para otras zonas
+
+# =====================
+# ARCHIVO PAGADOS
+# =====================
 if not os.path.exists(PAGADOS_FILE):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
@@ -25,20 +33,17 @@ if not os.path.exists(PAGADOS_FILE):
 # =====================
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# Leer configuración desde variables de entorno
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", '["https://back-viviapp.onrender.com"]').split(",")
-APP_TZ = os.getenv("APP_TZ", "UTC")  # Si no está definida, usamos UTC
-
 # CORS
+origins = os.getenv("CORS_ORIGINS", "").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Logging independiente para evitar errores de uvicorn.access
+# Logging
 logger = logging.getLogger("pedidos_logger")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -68,19 +73,9 @@ class ResumenDia(BaseModel):
     cantidad: int
 
 # =====================
-# Función para obtener fecha actual con zona horaria
-# =====================
-def get_today():
-    try:
-        tz = pytz.timezone(APP_TZ)
-        return datetime.now(tz).date()
-    except pytz.UnknownTimeZoneError:
-        # Si APP_TZ es inválido, usamos UTC y ajustamos manualmente -5 horas (Colombia)
-        return (datetime.utcnow() - timedelta(hours=5)).date()
-
-# =====================
 # ENDPOINTS
 # =====================
+
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
     return crud.crear_pedido(db, pedido)
@@ -98,10 +93,10 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
     
-    hoy = get_today()
+    # Fecha actual en UTC ajustada a Colombia
+    hoy = (datetime.utcnow() + timedelta(hours=TZ_OFFSET)).date()
     
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
-    
     total_hoy = db.query(
         func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
     ).filter(models.Pedido.fecha == hoy).scalar()
@@ -114,7 +109,7 @@ def resumen_pedidos(db: Session = Depends(get_db)):
         "total_pedidos": total_pedidos,
         "total_hoy": float(total_hoy),
         "total_general": float(total_general),
-        "fecha_actual": str(hoy)
+        "fecha_consulta": str(hoy)
     }
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -126,6 +121,9 @@ def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"detail": "Pedido eliminado exitosamente"}
 
+# =====================
+# PAGADOS (JSON y Excel)
+# =====================
 def load_pagados():
     if os.path.exists(PAGADOS_FILE):
         try:
