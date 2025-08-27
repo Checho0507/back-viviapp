@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, condecimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List
 import pytz
 from sqlalchemy.orm import Session
@@ -15,36 +15,24 @@ import pandas as pd
 
 PAGADOS_FILE = "pagados.json"
 
-# =====================
-# CONFIGURACIÓN GLOBAL
-# =====================
-
 # Asegurar que el archivo exista
 if not os.path.exists(PAGADOS_FILE):
     with open(PAGADOS_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=4)
-
-# Leer la zona horaria desde variable de entorno
-APP_TZ = os.getenv("APP_TZ", "America/Bogota")  # Valor por defecto si no existe
-try:
-    tz = pytz.timezone(APP_TZ)
-except pytz.UnknownTimeZoneError:
-    tz = pytz.timezone("America/Bogota")  # fallback
 
 # =====================
 # CONFIGURACIÓN DE LA APP
 # =====================
 app = FastAPI(title="Pedidos API", version="1.0")
 
-# CORS (leer también de entorno si quieres)
-origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [
-    "https://back-viviapp.onrender.com",
-    "https://front-viviapp.vercel.app"
-]
+# Leer configuración desde variables de entorno
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", '["https://back-viviapp.onrender.com"]').split(",")
+APP_TZ = os.getenv("APP_TZ", "UTC")  # Si no está definida, usamos UTC
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,6 +68,17 @@ class ResumenDia(BaseModel):
     cantidad: int
 
 # =====================
+# Función para obtener fecha actual con zona horaria
+# =====================
+def get_today():
+    try:
+        tz = pytz.timezone(APP_TZ)
+        return datetime.now(tz).date()
+    except pytz.UnknownTimeZoneError:
+        # Si APP_TZ es inválido, usamos UTC y ajustamos manualmente -5 horas (Colombia)
+        return (datetime.utcnow() - timedelta(hours=5)).date()
+
+# =====================
 # ENDPOINTS
 # =====================
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
@@ -99,9 +98,8 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     from sqlalchemy import func
     from decimal import Decimal
     
-    hoy = datetime.now(tz).date()
+    hoy = get_today()
     
-    # Usar SQL para hacer los cálculos (más eficiente y seguro)
     total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
     
     total_hoy = db.query(
@@ -115,7 +113,8 @@ def resumen_pedidos(db: Session = Depends(get_db)):
     return {
         "total_pedidos": total_pedidos,
         "total_hoy": float(total_hoy),
-        "total_general": float(total_general)
+        "total_general": float(total_general),
+        "fecha_actual": str(hoy)
     }
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -135,7 +134,7 @@ def load_pagados():
                 if isinstance(data, list):
                     return data
                 else:
-                    return []  # Si hay algo raro, devolvemos lista vacía
+                    return []
         except json.JSONDecodeError:
             return []
     return []
