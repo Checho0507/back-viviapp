@@ -148,122 +148,168 @@ def fecha_colombia_to_datetime_utc(fecha_colombia: date, hora_colombia: str = "1
 # =====================
 @app.post("/pedidos", response_model=PedidoOut, status_code=status.HTTP_201_CREATED)
 def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
-    # Log para debugging
-    logger.info(f"Creando pedido con fecha: {pedido.fecha}")
-    
-    # Convertir la fecha de Colombia a datetime UTC para la BD
-    fecha_utc = fecha_colombia_to_datetime_utc(pedido.fecha)
-    
-    # Crear una copia del pedido con la fecha convertida
-    pedido_data = pedido.model_dump()
-    pedido_data['fecha'] = fecha_utc
-    
-    logger.info(f"Fecha convertida para BD: {fecha_utc}")
-    
-    # Crear el pedido usando crud
-    return crud.crear_pedido(db, pedido, fecha_override=fecha_utc)
+    try:
+        # Log para debugging
+        logger.info(f"Creando pedido con fecha original: {pedido.fecha}")
+        
+        # Convertir la fecha de Colombia a datetime UTC para la BD
+        fecha_utc = fecha_colombia_to_datetime_utc(pedido.fecha)
+        
+        logger.info(f"Fecha convertida para BD: {fecha_utc}")
+        
+        # Crear el pedido directamente usando el modelo de SQLAlchemy
+        db_pedido = models.Pedido(
+            distribuidor=pedido.distribuidor,
+            valor=pedido.valor,
+            fecha=fecha_utc,
+            descripcion=pedido.descripcion
+        )
+        
+        # Guardar en la base de datos
+        db.add(db_pedido)
+        db.commit()
+        db.refresh(db_pedido)
+        
+        # Convertir la respuesta de vuelta a fecha de Colombia para el frontend
+        fecha_colombia_response = (fecha_utc - timedelta(hours=5)).date()
+        
+        # Retornar la respuesta con la fecha de Colombia
+        return PedidoOut(
+            id=db_pedido.id,
+            distribuidor=db_pedido.distribuidor,
+            valor=db_pedido.valor,
+            fecha=fecha_colombia_response,
+            descripcion=db_pedido.descripcion
+        )
+        
+    except Exception as e:
+        logger.error(f"Error creando pedido: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creando pedido: {str(e)}")
 
 
 @app.get("/pedidos", response_model=List[PedidoOut])
 def listar_pedidos(db: Session = Depends(get_db)):
-    pedidos = db.query(models.Pedido).all()
-    
-    # Convertir las fechas UTC de la BD a fechas de Colombia para la respuesta
-    pedidos_response = []
-    for pedido in pedidos:
-        pedido_dict = {
-            "id": pedido.id,
-            "distribuidor": pedido.distribuidor,
-            "valor": pedido.valor,
-            "descripcion": pedido.descripcion,
-            "fecha": pedido.fecha.date() if isinstance(pedido.fecha, datetime) else pedido.fecha
-        }
+    try:
+        pedidos = db.query(models.Pedido).all()
         
-        # Si la fecha está en UTC, convertir a Colombia
-        if isinstance(pedido.fecha, datetime):
-            fecha_colombia = (pedido.fecha - timedelta(hours=5)).date()
-            pedido_dict["fecha"] = fecha_colombia
+        # Convertir las fechas UTC de la BD a fechas de Colombia para la respuesta
+        pedidos_response = []
+        for pedido in pedidos:
+            # Convertir fecha UTC a fecha Colombia
+            if isinstance(pedido.fecha, datetime):
+                fecha_colombia = (pedido.fecha - timedelta(hours=5)).date()
+            else:
+                fecha_colombia = pedido.fecha
             
-        pedidos_response.append(PedidoOut(**pedido_dict))
-    
-    return pedidos_response
+            pedido_out = PedidoOut(
+                id=pedido.id,
+                distribuidor=pedido.distribuidor,
+                valor=pedido.valor,
+                descripcion=pedido.descripcion,
+                fecha=fecha_colombia
+            )
+            pedidos_response.append(pedido_out)
+        
+        return pedidos_response
+        
+    except Exception as e:
+        logger.error(f"Error listando pedidos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listando pedidos: {str(e)}")
 
 
 @app.get("/pedidos/resumen-dia", response_model=ResumenDia)
 def resumen_dia(fecha: date, db: Session = Depends(get_db)):
-    # Obtener el rango de datetime para el día específico en horario de Colombia
-    inicio_dia, final_dia = get_colombia_day_range(fecha)
-    
-    logger.info(f"Consultando resumen para fecha Colombia: {fecha}")
-    logger.info(f"Rango UTC para consulta: {inicio_dia} - {final_dia}")
-    
-    # Total y cantidad usando el rango de datetime
-    total_val, count_val = db.query(
-        func.coalesce(func.sum(models.Pedido.valor), 0),
-        func.count(models.Pedido.id),
-    ).filter(
-        and_(
-            models.Pedido.fecha >= inicio_dia,
-            models.Pedido.fecha <= final_dia
-        )
-    ).one()
+    try:
+        # Obtener el rango de datetime para el día específico en horario de Colombia
+        inicio_dia, final_dia = get_colombia_day_range(fecha)
+        
+        logger.info(f"Consultando resumen para fecha Colombia: {fecha}")
+        logger.info(f"Rango UTC para consulta: {inicio_dia} - {final_dia}")
+        
+        # Total y cantidad usando el rango de datetime
+        total_val, count_val = db.query(
+            func.coalesce(func.sum(models.Pedido.valor), 0),
+            func.count(models.Pedido.id),
+        ).filter(
+            and_(
+                models.Pedido.fecha >= inicio_dia,
+                models.Pedido.fecha <= final_dia
+            )
+        ).one()
 
-    return ResumenDia(
-        fecha=fecha,
-        total=total_val,
-        cantidad=count_val
-    )
+        return ResumenDia(
+            fecha=fecha,
+            total=total_val,
+            cantidad=count_val
+        )
+        
+    except Exception as e:
+        logger.error(f"Error en resumen día: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en resumen día: {str(e)}")
 
 
 @app.get("/pedidos/resumen-general")
 def resumen_pedidos(db: Session = Depends(get_db)):
-    from decimal import Decimal
+    try:
+        from decimal import Decimal
 
-    # Obtener la fecha actual de Colombia
-    hoy_colombia = fecha_colombia()
-    
-    # Obtener el rango de datetime para hoy en horario de Colombia
-    inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
+        # Obtener la fecha actual de Colombia
+        hoy_colombia = fecha_colombia()
+        
+        # Obtener el rango de datetime para hoy en horario de Colombia
+        inicio_hoy, final_hoy = get_colombia_day_range(hoy_colombia)
 
-    # Total de pedidos
-    total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
+        # Total de pedidos
+        total_pedidos = db.query(func.count(models.Pedido.id)).scalar() or 0
 
-    # Total de hoy usando el rango de datetime correcto
-    total_hoy = db.query(
-        func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-    ).filter(
-        and_(
-            models.Pedido.fecha >= inicio_hoy,
-            models.Pedido.fecha <= final_hoy
-        )
-    ).scalar()
+        # Total de hoy usando el rango de datetime correcto
+        total_hoy = db.query(
+            func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
+        ).filter(
+            and_(
+                models.Pedido.fecha >= inicio_hoy,
+                models.Pedido.fecha <= final_hoy
+            )
+        ).scalar()
 
-    # Total general
-    total_general = db.query(
-        func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
-    ).scalar()
+        # Total general
+        total_general = db.query(
+            func.coalesce(func.sum(models.Pedido.valor), Decimal('0.00'))
+        ).scalar()
 
-    # Log para debugging
-    logger.info(f"Fecha Colombia hoy: {hoy_colombia}")
-    logger.info(f"Rango UTC para consulta: {inicio_hoy} - {final_hoy}")
-    logger.info(f"Total hoy calculado: {total_hoy}")
+        # Log para debugging
+        logger.info(f"Fecha Colombia hoy: {hoy_colombia}")
+        logger.info(f"Rango UTC para consulta: {inicio_hoy} - {final_hoy}")
+        logger.info(f"Total hoy calculado: {total_hoy}")
 
-    return {
-        "total_pedidos": total_pedidos,
-        "total_hoy": float(total_hoy) if total_hoy else 0.0,
-        "total_general": float(total_general) if total_general else 0.0,
-        "fecha_colombia": hoy_colombia.isoformat()  # Para debugging
-    }
+        return {
+            "total_pedidos": total_pedidos,
+            "total_hoy": float(total_hoy) if total_hoy else 0.0,
+            "total_general": float(total_general) if total_general else 0.0,
+            "fecha_colombia": hoy_colombia.isoformat()  # Para debugging
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en resumen general: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en resumen general: {str(e)}")
 
 
 @app.delete("/pedidos/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_pedido(pedido_id: int, db: Session = Depends(get_db)):
-    pedido = db.query(models.Pedido).filter(models.Pedido.id == pedido_id).first()
-    if not pedido:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    db.delete(pedido)
-    db.commit()
-    return {"detail": "Pedido eliminado exitosamente"}
+    try:
+        pedido = db.query(models.Pedido).filter(models.Pedido.id == pedido_id).first()
+        if not pedido:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        db.delete(pedido)
+        db.commit()
+        return {"detail": "Pedido eliminado exitosamente"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error eliminando pedido: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error eliminando pedido: {str(e)}")
 
 
 # =====================
