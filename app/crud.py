@@ -2,16 +2,17 @@ from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from datetime import date
-from decimal import Decimal
 
 from . import models, schemas
 
+from datetime import timedelta
+from decimal import Decimal
 
 # Crear pedido
 def crear_pedido(db: Session, data: schemas.PedidoCreate) -> models.Pedido:
     pedido = models.Pedido(
         distribuidor=data.distribuidor.strip(),
-        fecha=data.fecha,
+        fecha=data.fecha + timedelta(days=1),  # ✅ Sumamos un día
         valor=Decimal(data.valor),  # Asegura que sea Decimal para la DB
         descripcion=data.descripcion.strip() if data.descripcion else None
     )
@@ -19,7 +20,6 @@ def crear_pedido(db: Session, data: schemas.PedidoCreate) -> models.Pedido:
     db.commit()
     db.refresh(pedido)
     return pedido
-
 
 # Listar pedidos por fecha
 def listar_pedidos_por_fecha(db: Session, fecha: date) -> List[models.Pedido]:
